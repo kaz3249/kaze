@@ -29,3 +29,10 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at TEXT
 );
 `);
+
+// This ensures the image column exists even if you created the database earlier
+try {
+  db.exec(`ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT '';`);
+} catch (e) {
+  // Column already exists, ignore error
+}
