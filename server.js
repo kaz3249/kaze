@@ -178,7 +178,7 @@ async function createOrderCore({ productId, payCurrency }) {
   try {
     checkout = await createNowPaymentsCheckout({ orderId, productId: product.id, priceUsd: product.price_usd, payCurrency });
   } catch (err) {
-    await sendTelegram(`⚠️ <b>Payment creation failed</b>\nProduct ID: <code>${escapeHtml(product.id)}</code>\nError: ${escapeHtml(err.message)}`);
+    await sendTelegram(`️ <b>Payment creation failed</b>\nProduct ID: <code>${escapeHtml(product.id)}</code>\nError: ${escapeHtml(err.message)}`);
     throw err;
   }
 
@@ -242,7 +242,6 @@ app.get('/', (_req, res) => {
   if (productPages.length === 0) {
     productsHTML = '<div class="empty-state">No products yet. Check back soon.</div>';
   } else {
-    // Create a block for every 9 products
     productPages.forEach((pageProducts, index) => {
       const pageLabel = productPages.length > 1 ? `<div class="page-label">Page ${index + 1}</div>` : '';
       
@@ -345,24 +344,76 @@ app.get('/', (_req, res) => {
       width: 60px; height: 1px; background: #333; margin-bottom: 60px;
     }
 
-    /* HOMEPAGE HERO */
+    /* HOMEPAGE HERO (Updated to match image) */
     #home {
       text-align: center;
-      padding: 150px 40px 100px;
+      padding: 120px 40px 100px;
+      background: radial-gradient(circle at top, #0a0a1a 0%, #000000 100%);
+      max-width: 100%;
     }
-    #home h1 {
+    .hero-title {
       font-family: 'Playfair Display', serif;
-      font-size: 4.5em;
+      font-size: 5em;
       font-weight: 400;
       color: #fff;
-      margin-bottom: 20px;
+      margin-bottom: 30px;
+      line-height: 1.1;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
     }
-    #home p {
-      font-family: 'Playfair Display', serif;
+    .hero-title .highlight {
+      color: #7c6ff7;
       font-style: italic;
-      font-size: 1.5em;
-      color: #888;
     }
+    .hero-title .italic {
+      font-style: italic;
+    }
+    .hero-subtitle {
+      color: #888;
+      font-size: 1.2em;
+      max-width: 700px;
+      margin: 0 auto 50px;
+      line-height: 1.6;
+    }
+    .hero-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 60px;
+    }
+    .btn-primary {
+      background: #7c6ff7;
+      color: white;
+      text-decoration: none;
+      padding: 16px 32px;
+      border-radius: 50px;
+      font-weight: 500;
+      font-size: 1em;
+      transition: all 0.3s ease;
+    }
+    .btn-primary:hover { background: #6b5ce6; transform: translateY(-2px); }
+    .btn-outline {
+      background: transparent;
+      color: white;
+      text-decoration: none;
+      padding: 16px 32px;
+      border-radius: 50px;
+      font-weight: 500;
+      font-size: 1em;
+      border: 1px solid #333;
+      transition: all 0.3s ease;
+    }
+    .btn-outline:hover { border-color: #fff; background: rgba(255,255,255,0.05); }
+    .trust-badge {
+      color: #666;
+      font-size: 0.95em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .trust-stars { color: #7c6ff7; letter-spacing: 2px; }
 
     /* SHOP SECTION */
     .product-page-block { margin-bottom: 80px; }
@@ -408,9 +459,7 @@ app.get('/', (_req, res) => {
       color: #e5e5e5; transition: all 0.3s ease;
     }
     .contact-card:hover { border-color: #2a2a2a; transform: translateY(-3px); }
-    .contact-icon {
-      width: 48px; height: 48px; margin: 0 auto 20px;
-    }
+    .contact-icon { width: 48px; height: 48px; margin: 0 auto 20px; }
     .contact-label { font-family: 'Playfair Display', serif; font-size: 1.4em; margin-bottom: 10px; color: #fff; font-weight: 400; }
     .contact-value { color: #666; font-size: 0.95em; }
     .icon-email { color: #f87171; }
@@ -437,18 +486,29 @@ app.get('/', (_req, res) => {
       .main-nav { padding: 16px 20px; flex-direction: column; gap: 16px; }
       .nav-links { gap: 24px; }
       section { padding: 60px 20px; }
-      .section-title, #home h1 { font-size: 2.2em; }
+      .hero-title { font-size: 3em; }
+      .section-title { font-size: 2.2em; }
       .products-grid, .contact-grid { grid-template-columns: 1fr; }
+      .hero-buttons { flex-direction: column; align-items: center; }
     }
   </style>
 </head>
 <body>
   ${navHTML}
   
-  <!-- HOMEPAGE HERO -->
+  <!-- HOMEPAGE HERO (Exact text from image) -->
   <section id="home">
-    <h1>The KAZE Catalog</h1>
-    <p>cinematic digital art</p>
+    <h1 class="hero-title">Where <span class="highlight">wind</span> becomes <span class="italic">cinematic art.</span></h1>
+    <p class="hero-subtitle">Printable calendars, posters and wall art inspired by JDM culture, anime, and the quiet cinema of Japan at night.</p>
+    
+    <div class="hero-buttons">
+      <a href="#shop" class="btn-primary">Enter the store ›</a>
+      <a href="#contact" class="btn-outline">Contact us</a>
+    </div>
+
+    <div class="trust-badge">
+      <span class="trust-stars">★★★★★</span> Trusted by collectors in 40+ countries
+    </div>
   </section>
 
   <!-- SHOP SECTION -->
@@ -542,7 +602,7 @@ app.get('/order/:id', (req, res) => {
       ? `<a href="${escapeHtml(order.checkout_url)}" target="_blank" class="pay-btn">Proceed to Payment</a>` 
       : `<p class="pay-address"><strong>Payment Address:</strong><br><code>${escapeHtml(order.pay_address || 'N/A')}</code></p>`;
     
-    productBox = `<div class="locked-box"><h2>🔒 Payment Required</h2><p>This product is locked until payment is confirmed.</p><p><strong>Product ID:</strong> <code>${escapeHtml(product.id)}</code></p><p><strong>Price:</strong> <span class="price-tag">$${escapeHtml(order.price_usd)}</span></p>${portalButton}<p class="help-text">Need help? <a href="https://t.me/277_RYNA">Contact us on Telegram</a></p></div>`;
+    productBox = `<div class="locked-box"><h2> Payment Required</h2><p>This product is locked until payment is confirmed.</p><p><strong>Product ID:</strong> <code>${escapeHtml(product.id)}</code></p><p><strong>Price:</strong> <span class="price-tag">$${escapeHtml(order.price_usd)}</span></p>${portalButton}<p class="help-text">Need help? <a href="https://t.me/277_RYNA">Contact us on Telegram</a></p></div>`;
   }
 
   res.send(`<!doctype html>
