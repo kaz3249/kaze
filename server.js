@@ -5,52 +5,30 @@ import session from 'express-session';
 import { db } from './db.js';
 
 const app = express();
-
 const PORT = process.env.PORT || 10000;
 const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-const SUPPORT_TELEGRAM_URL = 'https://t.me/277_RYNA';
-const DEFAULT_PAY_CURRENCY = process.env.DEFAULT_PAY_CURRENCY || 'usdttrc20';
-const PAYMENT_MODE = (process.env.PAYMENT_MODE || 'invoice').toLowerCase();
+
+// CRITICAL FIX FOR RENDER LOGIN:
+app.set('trust proxy', 1); 
 
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf.toString('utf8'); } }));
 
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf.toString('utf8');
-    }
-  })
-);
-
-// FIXED SESSION CONFIGURATION
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'super_secret_kaze_key_123',
+  secret: process.env.SESSION_SECRET || 'kaze_super_secret_key_999',
   resave: false,
   saveUninitialized: false,
-  cookie: { 
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 1000 * 60 * 60 * 24 // 24 hours
-  }
+  cookie: { secure: true, maxAge: 1000 * 60 * 60 * 24 } // secure: true works because of trust proxy
 }));
 
-class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
-
-function escapeHtml(value) {
-  return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
-}
+class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
+function escapeHtml(value) { return String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;'); }
 
 async function sendTelegram(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const token = process.env.TELEGRAM_BOT_TOKEN; const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return;
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true })
-    });
-  } catch (err) { console.error('Telegram error:', err.message); }
+  try { await fetch(`https://api.telegram.org/bot${token}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }) }); } 
+  catch (err) { console.error('Telegram error:', err.message); }
 }
 
 function normalizeStatus(status) {
@@ -67,41 +45,20 @@ function getOrderAndProduct(orderId) {
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   if (!order) return null;
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
-  if (!product) return null;
-  return { order, product };
-}
-
-function publicOrderJson(order, product) {
-  const isPaid = order.status === 'paid';
-  return {
-    locked: !isPaid, order_url: `${BASE_URL}/order/${order.id}`, support_url: SUPPORT_TELEGRAM_URL,
-    order: { id: order.id, product_id: order.product_id, status: order.status, price_usd: order.price_usd, pay_currency: order.pay_currency, pay_amount: order.pay_amount, pay_address: order.pay_address, checkout_url: order.checkout_url, nowpayments_payment_id: order.nowpayments_payment_id, created_at: order.created_at, paid_at: order.paid_at },
-    product: isPaid ? { id: product.id, name: product.name, description: product.description, image_url: product.image_url, secret_content: product.secret_content } : { id: product.id }
-  };
+  return product ? { order, product } : null;
 }
 
 async function createNowPaymentsCheckout({ orderId, productId, priceUsd, payCurrency }) {
   if (!process.env.NOWPAYMENTS_API_KEY) throw new ApiError(500, 'NOWPAYMENTS_API_KEY is not set');
   const headers = { 'x-api-key': process.env.NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' };
-  const description = `Product ID: ${productId} | Order ID: ${orderId}`;
-
-  if (PAYMENT_MODE === 'invoice') {
-    const body = { price_amount: Number(priceUsd), price_currency: 'usd', order_id: orderId, order_description: description, success_url: `${BASE_URL}/order/${orderId}`, cancel_url: `${BASE_URL}/` };
-    if (process.env.IPN_CALLBACK_URL) body.ipn_callback_url = process.env.IPN_CALLBACK_URL;
-    const res = await fetch('https://api.nowpayments.io/v1/invoice', { method: 'POST', headers, body: JSON.stringify(body) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiError(502, data.message || `NOWPayments error: ${res.status}`);
-    if (!data.invoice_url) throw new ApiError(502, 'Missing invoice_url');
-    return { mode: 'invoice', checkout_url: data.invoice_url, payment_id: data.id || data.invoice_id || null, pay_address: null, pay_amount: data.pay_amount ?? null, pay_currency: data.pay_currency ?? null, payment_status: 'pending' };
-  }
-
-  const body = { price_amount: Number(priceUsd), price_currency: 'usd', order_id: orderId, order_description: description };
+  const body = { price_amount: Number(priceUsd), price_currency: 'usd', order_id: orderId, order_description: `Product ID: ${productId}`, success_url: `${BASE_URL}/order/${orderId}`, cancel_url: BASE_URL };
   if (process.env.IPN_CALLBACK_URL) body.ipn_callback_url = process.env.IPN_CALLBACK_URL;
-  if (payCurrency) body.pay_currency = payCurrency;
-  const res = await fetch('https://api.nowpayments.io/v1/payment', { method: 'POST', headers, body: JSON.stringify(body) });
+  
+  const res = await fetch('https://api.nowpayments.io/v1/invoice', { method: 'POST', headers, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(502, data.message || `NOWPayments error: ${res.status}`);
-  return { mode: 'payment', checkout_url: data.invoice_url || null, payment_id: data.payment_id || data.id || null, pay_address: data.pay_address || null, pay_amount: data.pay_amount ?? null, pay_currency: data.pay_currency || null, payment_status: data.payment_status || 'pending' };
+  if (!res.ok) throw new ApiError(502, data.message || 'NOWPayments error');
+  if (!data.invoice_url) throw new ApiError(502, 'Missing invoice_url');
+  return { checkout_url: data.invoice_url, payment_id: data.id, payment_status: 'pending' };
 }
 
 async function createOrderCore({ productId, payCurrency }) {
@@ -110,104 +67,91 @@ async function createOrderCore({ productId, payCurrency }) {
   const orderId = crypto.randomUUID();
   let checkout;
   try { checkout = await createNowPaymentsCheckout({ orderId, productId: product.id, priceUsd: product.price_usd, payCurrency }); } 
-  catch (err) { await sendTelegram(`⚠️ <b>Payment creation failed</b>\nProduct ID: <code>${escapeHtml(product.id)}</code>\nError: ${escapeHtml(err.message)}`); throw err; }
+  catch (err) { await sendTelegram(`⚠️ Payment failed for ${product.id}: ${err.message}`); throw err; }
   
   const status = normalizeStatus(checkout.payment_status || 'pending');
-  db.prepare(`INSERT INTO orders (id, product_id, status, price_usd, pay_currency, pay_amount, pay_address, nowpayments_payment_id, checkout_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(orderId, product.id, status, product.price_usd, checkout.pay_currency ?? null, checkout.pay_amount ?? null, checkout.pay_address ?? null, checkout.payment_id ?? null, checkout.checkout_url ?? null);
+  db.prepare(`INSERT INTO orders (id, product_id, status, price_usd, pay_currency, pay_amount, pay_address, nowpayments_payment_id, checkout_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(orderId, product.id, status, product.price_usd, null, null, null, checkout.payment_id, checkout.checkout_url);
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
-  await sendTelegram(`🛒 <b>New Order</b>\nOrder ID: <code>${escapeHtml(order.id)}</code>\nProduct ID: <code>${escapeHtml(product.id)}</code>\nPrice: $${escapeHtml(product.price_usd)}\nStatus: ${escapeHtml(order.status)}\nCustomer URL: ${escapeHtml(`${BASE_URL}/order/${order.id}`)}`);
+  await sendTelegram(`🛒 <b>New Order</b>\nID: <code>${order.id}</code>\nProduct: <code>${product.id}</code>\nPrice: $${product.price_usd}`);
   return { order, product, checkout };
 }
 
 // ==========================================
-// SHARED NAVIGATION & FOOTER
+// SHARED HTML PARTS
 // ==========================================
 const navHTML = `<nav class="main-nav"><a href="/" class="logo">Kaze <span class="kanji">風</span></a><div class="nav-links"><a href="#shop">SHOP</a><a href="#contact">CONTACT</a><a href="#policy">POLICY</a></div></nav>`;
 const footerHTML = `<footer class="main-footer"><p class="tagline">Kaze <span class="dash">—</span> cinematic digital art,</p><p class="copyright">© 2026 KAZE Studio.</p></footer>`;
-
-const svgEmail = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>`;
+const svgEmail = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>`;
 const svgTelegram = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>`;
 const svgPinterest = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.162-.105-.949-.199-2.403.041-3.439.219-.937 1.406-5.957 1.406-5.957s-.359-.72-.359-1.781c0-1.663.967-2.911 2.168-2.911 1.024 0 1.518.769 1.518 1.688 0 1.029-.653 2.567-.992 3.992-.285 1.193.6 2.165 1.775 2.165 2.128 0 3.768-2.245 3.768-5.487 0-2.861-2.063-4.869-5.008-4.869-3.41 0-5.409 2.562-5.409 5.199 0 1.033.394 2.143.889 2.741.099.12.112.225.085.345-.09.375-.293 1.199-.334 1.363-.053.225-.172.271-.401.165-1.495-.69-2.433-2.878-2.433-4.646 0-3.776 2.748-7.252 7.92-7.252 4.158 0 7.392 2.967 7.392 6.923 0 4.135-2.607 7.462-6.233 7.462-1.214 0-2.354-.629-2.758-1.379l-.749 2.848c-.269 1.045-1.004 2.352-1.498 3.146 1.123.345 2.306.535 3.55.535 6.607 0 11.985-5.365 11.985-11.987C23.97 5.39 18.592.026 11.985.026L12.017 0z"/></svg>`;
 
 // ==========================================
-// MAIN SINGLE-PAGE LAYOUT
+// MAIN STORE PAGE
 // ==========================================
 app.get('/', (_req, res) => {
   const allProducts = db.prepare('SELECT id, name, price_usd, image_url FROM products ORDER BY created_at DESC, id').all();
-  const chunkSize = 9;
-  const productPages = [];
+  const chunkSize = 9; const productPages = [];
   for (let i = 0; i < allProducts.length; i += chunkSize) productPages.push(allProducts.slice(i, i + chunkSize));
 
   let productsHTML = '';
-  if (productPages.length === 0) {
-    productsHTML = '<div class="empty-state">No products yet. Check back soon.</div>';
-  } else {
+  if (productPages.length === 0) productsHTML = '<div class="empty-state">No products yet. Check back soon.</div>';
+  else {
     productPages.forEach((pageProducts, index) => {
       const pageLabel = productPages.length > 1 ? `<div class="page-label">Page ${index + 1}</div>` : '';
       const cardsHTML = pageProducts.map((p) => `
         <div class="product-card">
           ${p.image_url ? `<img src="${escapeHtml(p.image_url)}" class="product-img" alt="${escapeHtml(p.name)}" onerror="this.style.display='none'">` : ''}
-          <div class="product-header">
-            <div class="product-id">ID: <code>${escapeHtml(p.id)}</code></div>
-            <div class="product-price">$${escapeHtml(p.price_usd)}</div>
-          </div>
+          <div class="product-header"><div class="product-id">ID: <code>${escapeHtml(p.id)}</code></div><div class="product-price">$${escapeHtml(p.price_usd)}</div></div>
           <div class="product-name">${escapeHtml(p.name)}</div>
-          <form method="POST" action="/buy" class="buy-form">
-            <input type="hidden" name="product_id" value="${escapeHtml(p.id)}">
-            <input type="hidden" name="pay_currency" value="${escapeHtml(DEFAULT_PAY_CURRENCY)}">
-            <button type="submit" class="buy-btn">Purchase</button>
-          </form>
-        </div>
-      `).join('');
+          <form method="POST" action="/buy" class="buy-form"><input type="hidden" name="product_id" value="${escapeHtml(p.id)}"><button type="submit" class="buy-btn">Purchase</button></form>
+        </div>`).join('');
       productsHTML += `<div class="product-page-block">${pageLabel}<div class="products-grid">${cardsHTML}</div></div>`;
     });
   }
 
-  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>KAZE Studio</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>
+  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>KAZE Studio</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>
     html { scroll-behavior: smooth; } * { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: 'Inter', sans-serif; background: #000; color: #e5e5e5; line-height: 1.6; }
     .main-nav { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid #1a1a1a; background: #000; position: sticky; top: 0; z-index: 100; }
-    .logo { font-family: 'Playfair Display', serif; font-size: 1.8em; font-style: italic; color: #7c6ff7; text-decoration: none; font-weight: 400; }
-    .logo .kanji { font-style: normal; font-size: 0.7em; margin-left: 4px; }
-    .nav-links { display: flex; gap: 40px; } .nav-links a { color: #888; text-decoration: none; font-size: 0.85em; letter-spacing: 2px; font-weight: 400; transition: color 0.3s ease; } .nav-links a:hover { color: #fff; }
+    .logo { font-family: 'Playfair Display', serif; font-size: 1.8em; font-style: italic; color: #7c6ff7; text-decoration: none; } .logo .kanji { font-style: normal; font-size: 0.7em; margin-left: 4px; }
+    .nav-links { display: flex; gap: 40px; } .nav-links a { color: #888; text-decoration: none; font-size: 0.85em; letter-spacing: 2px; transition: color 0.3s; } .nav-links a:hover { color: #fff; }
     section { max-width: 1000px; margin: 0 auto; padding: 100px 40px; }
     .badge { display: inline-block; border: 1px solid #333; border-radius: 30px; padding: 10px 28px; font-size: 0.8em; letter-spacing: 3px; color: #7c6ff7; margin-bottom: 40px; }
-    .section-title { font-family: 'Playfair Display', serif; font-size: 3.5em; font-weight: 400; color: #fff; margin-bottom: 20px; letter-spacing: 1px; }
-    .title-divider { width: 60px; height: 1px; background: #333; margin-bottom: 60px; }
+    .section-title { font-family: 'Playfair Display', serif; font-size: 3.5em; font-weight: 400; color: #fff; margin-bottom: 20px; } .title-divider { width: 60px; height: 1px; background: #333; margin-bottom: 60px; }
     #home { text-align: center; padding: 120px 40px 100px; background: radial-gradient(circle at top, #0a0a1a 0%, #000000 100%); max-width: 100%; }
-    .hero-title { font-family: 'Playfair Display', serif; font-size: 5em; font-weight: 400; color: #fff; margin-bottom: 30px; line-height: 1.1; max-width: 900px; margin-left: auto; margin-right: auto; }
+    .hero-title { font-family: 'Playfair Display', serif; font-size: 5em; font-weight: 400; color: #fff; margin-bottom: 30px; line-height: 1.1; max-width: 900px; margin: 0 auto 30px; }
     .hero-title .highlight { color: #7c6ff7; font-style: italic; } .hero-title .italic { font-style: italic; }
-    .hero-subtitle { color: #888; font-size: 1.2em; max-width: 700px; margin: 0 auto 50px; line-height: 1.6; }
+    .hero-subtitle { color: #888; font-size: 1.2em; max-width: 700px; margin: 0 auto 50px; }
     .hero-buttons { display: flex; justify-content: center; gap: 20px; margin-bottom: 60px; }
-    .btn-primary { background: #7c6ff7; color: white; text-decoration: none; padding: 16px 32px; border-radius: 50px; font-weight: 500; font-size: 1em; transition: all 0.3s ease; } .btn-primary:hover { background: #6b5ce6; transform: translateY(-2px); }
-    .btn-outline { background: transparent; color: white; text-decoration: none; padding: 16px 32px; border-radius: 50px; font-weight: 500; font-size: 1em; border: 1px solid #333; transition: all 0.3s ease; } .btn-outline:hover { border-color: #fff; background: rgba(255,255,255,0.05); }
+    .btn-primary { background: #7c6ff7; color: white; text-decoration: none; padding: 16px 32px; border-radius: 50px; font-weight: 500; transition: all 0.3s; } .btn-primary:hover { background: #6b5ce6; transform: translateY(-2px); }
+    .btn-outline { background: transparent; color: white; text-decoration: none; padding: 16px 32px; border-radius: 50px; font-weight: 500; border: 1px solid #333; transition: all 0.3s; } .btn-outline:hover { border-color: #fff; }
     .trust-badge { color: #666; font-size: 0.95em; display: flex; align-items: center; justify-content: center; gap: 10px; } .trust-stars { color: #7c6ff7; letter-spacing: 2px; }
     .product-page-block { margin-bottom: 80px; } .page-label { text-align: center; color: #555; font-size: 0.9em; letter-spacing: 2px; margin-bottom: 30px; text-transform: uppercase; }
     .products-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px; }
-    .product-card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 12px; padding: 30px; transition: all 0.3s ease; display: flex; flex-direction: column; }
+    .product-card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 12px; padding: 30px; transition: all 0.3s; display: flex; flex-direction: column; }
     .product-card:hover { border-color: #2a2a2a; transform: translateY(-2px); }
     .product-img { width: 100%; height: 220px; object-fit: cover; border-radius: 8px; margin-bottom: 20px; background: #111; }
-    .product-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; margin-top: auto; }
-    .product-id { color: #666; font-size: 0.8em; letter-spacing: 1px; } .product-price { color: #4ade80; font-size: 1.1em; font-weight: 600; }
-    .product-name { font-family: 'Playfair Display', serif; font-size: 1.4em; color: #fff; margin-bottom: 20px; font-weight: 400; }
-    .buy-btn { width: 100%; background: #7c6ff7; color: white; border: none; padding: 14px; border-radius: 8px; font-weight: 500; font-size: 0.9em; letter-spacing: 1px; cursor: pointer; transition: all 0.3s ease; } .buy-btn:hover { background: #6b5ce6; }
-    .empty-state { text-align: center; padding: 80px 20px; color: #555; font-size: 1.1em; }
+    .product-header { display: flex; justify-content: space-between; margin-bottom: 12px; margin-top: auto; }
+    .product-id { color: #666; font-size: 0.8em; } .product-price { color: #4ade80; font-size: 1.1em; font-weight: 600; }
+    .product-name { font-family: 'Playfair Display', serif; font-size: 1.4em; color: #fff; margin-bottom: 20px; }
+    .buy-btn { width: 100%; background: #7c6ff7; color: white; border: none; padding: 14px; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.3s; } .buy-btn:hover { background: #6b5ce6; }
+    .empty-state { text-align: center; padding: 80px 20px; color: #555; }
     #contact { text-align: center; } .contact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px; max-width: 900px; margin: 0 auto; }
-    .contact-card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 12px; padding: 50px 30px; text-align: center; text-decoration: none; color: #e5e5e5; transition: all 0.3s ease; } .contact-card:hover { border-color: #2a2a2a; transform: translateY(-3px); }
-    .contact-icon { width: 48px; height: 48px; margin: 0 auto 20px; } .contact-label { font-family: 'Playfair Display', serif; font-size: 1.4em; margin-bottom: 10px; color: #fff; font-weight: 400; } .contact-value { color: #666; font-size: 0.95em; }
+    .contact-card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 12px; padding: 50px 30px; text-align: center; text-decoration: none; color: #e5e5e5; transition: all 0.3s; } .contact-card:hover { border-color: #2a2a2a; transform: translateY(-3px); }
+    .contact-icon { width: 48px; height: 48px; margin: 0 auto 20px; } .contact-label { font-family: 'Playfair Display', serif; font-size: 1.4em; margin-bottom: 10px; color: #fff; } .contact-value { color: #666; font-size: 0.95em; }
     .icon-email { color: #f87171; } .icon-telegram { color: #38bdf8; } .icon-pinterest { color: #e91e63; }
-    .policy-content { max-width: 800px; margin: 0 auto; } .policy-section { margin-bottom: 50px; } .policy-section h2 { font-family: 'Playfair Display', serif; font-size: 1.8em; color: #fff; margin-bottom: 20px; font-weight: 400; } .policy-section p { color: #888; font-size: 1em; line-height: 1.8; }
-    .main-footer { text-align: center; padding: 60px 20px 40px; border-top: 1px solid #1a1a1a; } .tagline { font-family: 'Playfair Display', serif; font-style: italic; font-size: 1.3em; color: #7c6ff7; margin-bottom: 20px; font-weight: 400; } .tagline .dash { color: #555; margin: 0 8px; } .copyright { color: #555; font-size: 0.9em; }
-    code { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; font-family: 'Courier New', monospace; color: #7c6ff7; font-size: 0.9em; }
-    @media (max-width: 768px) { .main-nav { padding: 16px 20px; flex-direction: column; gap: 16px; } .nav-links { gap: 24px; } section { padding: 60px 20px; } .hero-title { font-size: 3em; } .section-title { font-size: 2.2em; } .products-grid, .contact-grid { grid-template-columns: 1fr; } .hero-buttons { flex-direction: column; align-items: center; } }
+    .policy-content { max-width: 800px; margin: 0 auto; } .policy-section { margin-bottom: 50px; } .policy-section h2 { font-family: 'Playfair Display', serif; font-size: 1.8em; color: #fff; margin-bottom: 20px; } .policy-section p { color: #888; line-height: 1.8; }
+    .main-footer { text-align: center; padding: 60px 20px 40px; border-top: 1px solid #1a1a1a; } .tagline { font-family: 'Playfair Display', serif; font-style: italic; font-size: 1.3em; color: #7c6ff7; margin-bottom: 20px; } .copyright { color: #555; font-size: 0.9em; }
+    code { background: #1a1a1a; padding: 2px 8px; border-radius: 4px; color: #7c6ff7; }
+    @media (max-width: 768px) { .main-nav { padding: 16px 20px; flex-direction: column; gap: 16px; } .hero-title { font-size: 3em; } .products-grid, .contact-grid { grid-template-columns: 1fr; } }
   </style></head><body>${navHTML}
   <section id="home"><h1 class="hero-title">Where <span class="highlight">wind</span> becomes <span class="italic">cinematic art.</span></h1><p class="hero-subtitle">Printable calendars, posters and wall art inspired by JDM culture, anime, and the quiet cinema of Japan at night.</p><div class="hero-buttons"><a href="#shop" class="btn-primary">Enter the store ›</a><a href="#contact" class="btn-outline">Contact us</a></div><div class="trust-badge"><span class="trust-stars">★★★★★</span> Trusted by collectors in 40+ countries</div></section>
   <section id="shop"><div style="text-align:center;"><div class="badge">COLLECTION</div></div><h2 class="section-title" style="text-align:center;">Shop</h2><div class="title-divider" style="margin:0 auto 60px;"></div>${productsHTML}</section>
-  <section id="contact"><div style="text-align:center;"><div class="badge">REACH US</div></div><h2 class="section-title" style="text-align:center;">A quiet channel, always open.</h2><p style="color:#888; margin-bottom:60px; max-width:600px; margin-left:auto; margin-right:auto;">Questions about a piece, a custom commission, or a wholesale order? We reply within 24h.</p><div class="contact-grid"><a href="mailto:kaze.2.7.7.9.3@gmail.com" class="contact-card"><div class="contact-icon icon-email">${svgEmail}</div><div class="contact-label">Email</div><div class="contact-value">kaze.2.7.7.9.3@gmail.com</div></a><a href="https://t.me/277_RYNA" target="_blank" class="contact-card"><div class="contact-icon icon-telegram">${svgTelegram}</div><div class="contact-label">Telegram</div><div class="contact-value">@277_RYNA</div></a><a href="https://pinterest.com/KAZE277" target="_blank" class="contact-card"><div class="contact-icon icon-pinterest">${svgPinterest}</div><div class="contact-label">Pinterest</div><div class="contact-value">@KAZE277</div></a></div></section>
+  <section id="contact"><div style="text-align:center;"><div class="badge">REACH US</div></div><h2 class="section-title" style="text-align:center;">A quiet channel, always open.</h2><p style="color:#888; margin-bottom:60px; max-width:600px; margin:0 auto;">Questions about a piece, a custom commission, or a wholesale order? We reply within 24h.</p><div class="contact-grid"><a href="mailto:kaze.2.7.7.9.3@gmail.com" class="contact-card"><div class="contact-icon icon-email">${svgEmail}</div><div class="contact-label">Email</div><div class="contact-value">kaze.2.7.7.9.3@gmail.com</div></a><a href="https://t.me/277_RYNA" target="_blank" class="contact-card"><div class="contact-icon icon-telegram">${svgTelegram}</div><div class="contact-label">Telegram</div><div class="contact-value">@277_RYNA</div></a><a href="https://pinterest.com/KAZE277" target="_blank" class="contact-card"><div class="contact-icon icon-pinterest">${svgPinterest}</div><div class="contact-label">Pinterest</div><div class="contact-value">@KAZE277</div></a></div></section>
   <section id="policy"><div style="text-align:center;"><div class="badge">FINE PRINT</div></div><h2 class="section-title" style="text-align:center;">Return & Refund Policy</h2><div class="title-divider" style="margin:0 auto 60px;"></div><div class="policy-content"><div class="policy-section"><h2>Digital products</h2><p>All digital downloads are final. Because files are delivered instantly and cannot be "returned", we do not offer refunds on digital purchases. If your file is corrupted or the download link fails, contact us within 7 days and we'll re-issue it.</p></div><div class="policy-section"><h2>Custom commissions</h2><p>Custom work is non-refundable once the creative process has begun. We provide previews and revisions throughout the process to ensure your satisfaction before final delivery.</p></div></div></section>${footerHTML}</body></html>`);
 });
 
 app.post('/buy', async (req, res) => {
-  try { const result = await createOrderCore({ productId: req.body.product_id, payCurrency: req.body.pay_currency || DEFAULT_PAY_CURRENCY }); res.redirect(303, `/order/${result.order.id}`); } 
+  try { const result = await createOrderCore({ productId: req.body.product_id, payCurrency: req.body.pay_currency || 'usdttrc20' }); res.redirect(303, `/order/${result.order.id}`); } 
   catch (err) { res.status(err.status || 500).send(`<h1>Error</h1><pre>${escapeHtml(err.message)}</pre><a href="/">Back</a>`); }
 });
 
@@ -219,32 +163,31 @@ app.get('/order/:id', (req, res) => {
   let productBox;
   if (isPaid) {
     const downloadBtn = product.secret_content.startsWith('http') ? `<a href="${escapeHtml(product.secret_content)}" target="_blank" class="pay-btn" style="background:#4ade80;color:#000;margin-top:15px;display:inline-block;">Download PDF / Access File</a>` : '';
-    productBox = `<div class="unlocked-box"><h2>✅ Product Unlocked</h2><p><strong>Product ID:</strong> <code>${escapeHtml(product.id)}</code></p><p><strong>Name:</strong> ${escapeHtml(product.name)}</p>${downloadBtn}<h3 style="margin-top:20px;">Access Link / Content:</h3><pre>${escapeHtml(product.secret_content)}</pre></div>`;
+    productBox = `<div class="unlocked-box"><h2>✅ Product Unlocked</h2><p><strong>Name:</strong> ${escapeHtml(product.name)}</p>${downloadBtn}<h3 style="margin-top:20px;">Access Link:</h3><pre>${escapeHtml(product.secret_content)}</pre></div>`;
   } else {
-    const portalButton = order.checkout_url ? `<a href="${escapeHtml(order.checkout_url)}" target="_blank" class="pay-btn">Proceed to Payment</a>` : `<p class="pay-address"><strong>Payment Address:</strong><br><code>${escapeHtml(order.pay_address || 'N/A')}</code></p>`;
-    productBox = `<div class="locked-box"><h2>🔒 Payment Required</h2><p>This product is locked until payment is confirmed.</p><p><strong>Product ID:</strong> <code>${escapeHtml(product.id)}</code></p><p><strong>Price:</strong> <span class="price-tag">$${escapeHtml(order.price_usd)}</span></p>${portalButton}<p class="help-text">Need help? <a href="https://t.me/277_RYNA">Contact us on Telegram</a></p></div>`;
+    const portalButton = order.checkout_url ? `<a href="${escapeHtml(order.checkout_url)}" target="_blank" class="pay-btn">Proceed to Payment</a>` : `<p>Payment pending...</p>`;
+    productBox = `<div class="locked-box"><h2> Payment Required</h2><p><strong>Price:</strong> <span class="price-tag">$${escapeHtml(order.price_usd)}</span></p>${portalButton}<p class="help-text">Need help? <a href="https://t.me/277_RYNA">Contact us</a></p></div>`;
   }
-  res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Order Details</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>* { margin: 0; padding: 0; box-sizing: border-box; } body { font-family: 'Inter', sans-serif; background: #000; color: #e5e5e5; line-height: 1.6; min-height: 100vh; } .container { max-width: 700px; margin: 0 auto; padding: 80px 40px; } .card { background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 16px; padding: 50px; } h1 { font-family: 'Playfair Display', serif; font-size: 2.5em; font-weight: 400; margin-bottom: 30px; color: #fff; } .info-row { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #1a1a1a; } .info-label { color: #666; font-size: 0.85em; letter-spacing: 1px; margin-bottom: 6px; } .info-value { font-size: 1.1em; color: #fff; } code { background: #1a1a1a; padding: 3px 10px; border-radius: 4px; font-family: 'Courier New', monospace; color: #7c6ff7; } .unlocked-box { background: #064e3b; border: 1px solid #4ade80; border-radius: 12px; padding: 30px; margin-top: 30px; } .unlocked-box h2 { color: #4ade80; margin-bottom: 16px; font-family: 'Playfair Display', serif; font-weight: 400; } .locked-box { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 12px; padding: 30px; margin-top: 30px; } .locked-box h2 { color: #fbbf24; margin-bottom: 16px; font-family: 'Playfair Display', serif; font-weight: 400; } .price-tag { color: #4ade80; font-size: 1.4em; font-weight: 600; } .pay-btn { display: inline-block; background: #7c6ff7; color: white; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 500; margin-top: 16px; transition: all 0.3s ease; } .pay-btn:hover { background: #6b5ce6; } .pay-address { background: #1a1a1a; padding: 16px; border-radius: 8px; margin-top: 16px; } .help-text { margin-top: 24px; color: #888; font-size: 0.95em; } .help-text a { color: #7c6ff7; text-decoration: none; } pre { background: #020617; padding: 20px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; margin-top: 16px; } a { color: #7c6ff7; text-decoration: none; }</style></head><body><div class="container"><div class="card"><h1>Order Details</h1><div class="info-row"><div class="info-label">ORDER ID</div><div class="info-value"><code>${escapeHtml(order.id)}</code></div></div><div class="info-row"><div class="info-label">STATUS</div><div class="info-value" style="color:${order.status === 'paid' ? '#4ade80' : '#fbbf24'};font-weight:600;">${escapeHtml(order.status.toUpperCase())}</div></div><div class="info-row"><div class="info-label">PRICE</div><div class="info-value">$${escapeHtml(order.price_usd)}</div></div>${productBox}<p style="margin-top:32px;"><a href="/">← Back to Shop</a></p></div></div><script>const orderId=${JSON.stringify(order.id)};async function checkStatus(){try{const res=await fetch('/api/orders/'+encodeURIComponent(orderId));const data=await res.json();if(!data.locked)window.location.reload();}catch(e){}}setInterval(checkStatus,5000);</script></body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Order Details</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400;600&display=swap" rel="stylesheet"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#000;color:#e5e5e5;min-height:100vh}.container{max-width:700px;margin:0 auto;padding:80px 40px}.card{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:16px;padding:50px}h1{font-family:'Playfair Display',serif;font-size:2.5em;margin-bottom:30px;color:#fff}.info-row{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #1a1a1a}.info-label{color:#666;font-size:0.85em;margin-bottom:6px}.info-value{font-size:1.1em;color:#fff}code{background:#1a1a1a;padding:3px 10px;border-radius:4px;color:#7c6ff7}.unlocked-box{background:#064e3b;border:1px solid #4ade80;border-radius:12px;padding:30px;margin-top:30px}.unlocked-box h2{color:#4ade80;margin-bottom:16px}.locked-box{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:30px;margin-top:30px}.locked-box h2{color:#fbbf24;margin-bottom:16px}.price-tag{color:#4ade80;font-size:1.4em;font-weight:600}.pay-btn{display:inline-block;background:#7c6ff7;color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:500;margin-top:16px}.help-text{margin-top:24px;color:#888}.help-text a{color:#7c6ff7;text-decoration:none}pre{background:#020617;padding:20px;border-radius:8px;white-space:pre-wrap;margin-top:16px}a{color:#7c6ff7;text-decoration:none}</style></head><body><div class="container"><div class="card"><h1>Order Details</h1><div class="info-row"><div class="info-label">ORDER ID</div><div class="info-value"><code>${escapeHtml(order.id)}</code></div></div><div class="info-row"><div class="info-label">STATUS</div><div class="info-value" style="color:${order.status === 'paid' ? '#4ade80' : '#fbbf24'};font-weight:600;">${escapeHtml(order.status.toUpperCase())}</div></div><div class="info-row"><div class="info-label">PRICE</div><div class="info-value">$${escapeHtml(order.price_usd)}</div></div>${productBox}<p style="margin-top:32px;"><a href="/">← Back to Shop</a></p></div></div><script>const orderId=${JSON.stringify(order.id)};async function checkStatus(){try{const res=await fetch('/api/orders/'+encodeURIComponent(orderId));const data=await res.json();if(!data.locked)window.location.reload();}catch(e){}}setInterval(checkStatus,5000);</script></body></html>`);
 });
 
-app.get('/api/products', (_req, res) => { res.json(db.prepare('SELECT id, price_usd FROM products ORDER BY created_at DESC, id').all()); });
-app.post('/api/orders', async (req, res) => { try { const { product_id, pay_currency } = req.body || {}; if (!product_id) throw new ApiError(400, 'product_id is required'); const result = await createOrderCore({ productId: product_id, payCurrency: pay_currency || DEFAULT_PAY_CURRENCY }); res.json(publicOrderJson(result.order, result.product)); } catch (err) { res.status(err.status || 500).json({ error: err.message }); } });
-app.get('/api/orders/:id', (req, res) => { const data = getOrderAndProduct(req.params.id); if (!data) return res.status(404).json({ error: 'Order not found' }); res.json(publicOrderJson(data.order, data.product)); });
+app.get('/api/products', (_req, res) => { res.json(db.prepare('SELECT id, price_usd FROM products ORDER BY created_at DESC').all()); });
+app.get('/api/orders/:id', (req, res) => { const data = getOrderAndProduct(req.params.id); if (!data) return res.status(404).json({ error: 'Not found' }); res.json({ locked: data.order.status !== 'paid', order: data.order, product: data.order.status === 'paid' ? data.product : { id: data.product.id } }); });
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 app.post('/webhook/nowpayments', async (req, res) => {
   try {
     const secret = process.env.NOWPAYMENTS_IPN_SECRET;
-    if (secret) { const signature = req.header('x-nowpayments-signature') || ''; const hmac = crypto.createHmac('sha512', secret).update(req.rawBody || '').digest('hex'); const a = Buffer.from(signature); const b = Buffer.from(hmac); if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).send('Invalid signature'); }
+    if (secret) { const sig = req.header('x-nowpayments-signature') || ''; const hmac = crypto.createHmac('sha512', secret).update(req.rawBody || '').digest('hex'); if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(hmac))) return res.status(401).send('Invalid signature'); }
     const payload = req.body || {}; let order = null;
     if (payload.order_id) order = db.prepare('SELECT * FROM orders WHERE id = ?').get(String(payload.order_id));
     if (!order && payload.payment_id) order = db.prepare('SELECT * FROM orders WHERE nowpayments_payment_id = ?').get(String(payload.payment_id));
     if (!order) return res.status(200).send('ignored');
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
     const previousStatus = order.status; const newStatus = normalizeStatus(payload.payment_status || payload.status || order.status);
-    db.prepare(`UPDATE orders SET status = ?, nowpayments_payment_id = COALESCE(?, nowpayments_payment_id), pay_amount = COALESCE(?, pay_amount), pay_address = COALESCE(?, pay_address), pay_currency = COALESCE(?, pay_currency), paid_at = CASE WHEN ? = 'paid' AND paid_at IS NULL THEN datetime('now') ELSE paid_at END WHERE id = ?`).run(newStatus, payload.payment_id ?? null, payload.pay_amount ?? null, payload.pay_address ?? null, payload.pay_currency ?? null, newStatus, order.id);
+    db.prepare(`UPDATE orders SET status = ?, nowpayments_payment_id = COALESCE(?, nowpayments_payment_id), pay_amount = COALESCE(?, pay_amount), paid_at = CASE WHEN ? = 'paid' AND paid_at IS NULL THEN datetime('now') ELSE paid_at END WHERE id = ?`).run(newStatus, payload.payment_id ?? null, payload.pay_amount ?? null, newStatus, order.id);
     const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
-    if (previousStatus !== newStatus && ['paid', 'partial', 'failed', 'confirming'].includes(newStatus)) { const emoji = newStatus === 'paid' ? '✅' : newStatus === 'partial' ? '️' : newStatus === 'confirming' ? '🕒' : '❌'; await sendTelegram(`${emoji} <b>Payment ${escapeHtml(newStatus.toUpperCase())}</b>\nOrder ID: <code>${escapeHtml(updated.id)}</code>\nProduct ID: <code>${escapeHtml(product.id)}</code>\nPaid Amount: ${escapeHtml(payload.actually_paid ?? payload.pay_amount ?? 'N/A')}`); }
+    if (previousStatus !== newStatus && ['paid', 'partial', 'failed', 'confirming'].includes(newStatus)) { const emoji = newStatus === 'paid' ? '✅' : newStatus === 'partial' ? '️' : newStatus === 'confirming' ? '🕒' : '❌'; await sendTelegram(`${emoji} <b>Payment ${escapeHtml(newStatus.toUpperCase())}</b>\nOrder ID: <code>${escapeHtml(updated.id)}</code>\nProduct ID: <code>${escapeHtml(product.id)}</code>`); }
     res.status(200).send('ok');
   } catch (err) { console.error('Webhook error:', err); res.status(200).send('ok'); }
 });
@@ -258,28 +201,9 @@ const requireLogin = (req, res, next) => {
 };
 
 app.get('/admin/login', (req, res) => { 
-  res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px;transition:all 0.3s ease}button:hover{background:#6b5ce6}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
+  res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400;500&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}button:hover{background:#6b5ce6}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
 });
 
-// FIXED LOGIN ROUTE
-app.post('/admin/login', (req, res) => {
-  const enteredPassword = req.body.password;
-  console.log('Login attempt. Entered:', enteredPassword, 'Expected:', process.env.ADMIN_PASSWORD);
-  
-  if (enteredPassword === process.env.ADMIN_PASSWORD) { 
-    req.session.isAdmin = true; 
-    // Force save the session before redirecting to fix the bug
-    req.session.save((err) => {
-      if (err) {
-        console.error("Session save error:", err);
-        return res.status(500).send("Error saving session. Please try again.");
-      }
-      res.redirect('/admin'); 
-    });
-  } else { 
-    res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">❌ Incorrect password. Please try again.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
-  }
-});
 app.post('/admin/login', (req, res) => {
   const enteredPassword = req.body.password;
   const realPassword = process.env.ADMIN_PASSWORD || 'test123'; 
@@ -287,32 +211,29 @@ app.post('/admin/login', (req, res) => {
   console.log('=== LOGIN ATTEMPT ===');
   console.log('Entered:', enteredPassword);
   console.log('Expected:', realPassword);
-  console.log('Match:', enteredPassword === realPassword);
   
   if (enteredPassword === realPassword) { 
     console.log('Password correct! Setting session...');
     req.session.isAdmin = true; 
-    
-    // Simple redirect without callback - more reliable
     res.redirect('/admin'); 
   } else { 
     console.log('Password incorrect!');
-    res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">❌ Incorrect password. Please try again.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
+    res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400;500&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">❌ Incorrect password.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
   }
 });
+
 app.get('/admin', requireLogin, (req, res) => { 
-  res.send(`<!doctype html><html><head><title>Admin Dashboard</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>
+  res.send(`<!doctype html><html><head><title>Admin Dashboard</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400;500&display=swap" rel="stylesheet"><style>
     body{font-family:'Inter',sans-serif;margin:0;background:#000;color:#e5e7eb}
-    input,textarea{width:100%;padding:14px;margin:10px 0;box-sizing:border-box;border-radius:8px;border:1px solid #2a2a2a;background:#0a0a0a;color:#e5e7eb;font-size:1em;font-family:'Inter',sans-serif}
+    input,textarea{width:100%;padding:14px;margin:10px 0;box-sizing:border-box;border-radius:8px;border:1px solid #2a2a2a;background:#0a0a0a;color:#e5e7eb;font-size:1em}
     input:focus,textarea:focus{outline:none;border-color:#7c6ff7}
-    button{background:#7c6ff7;border:none;padding:16px 32px;border-radius:8px;color:white;font-weight:500;cursor:pointer;font-size:1em;margin-top:20px;letter-spacing:1px;transition:all 0.3s ease}
-    button:hover{background:#6b5ce6;transform:translateY(-2px)}
-    .logout{display:inline-block;background:#dc2626;padding:12px 24px;margin-top:40px;text-decoration:none;color:white;border-radius:8px;transition:all 0.3s ease}
-    .logout:hover{background:#b91c1c}
+    button{background:#7c6ff7;border:none;padding:16px 32px;border-radius:8px;color:white;font-weight:500;cursor:pointer;font-size:1em;margin-top:20px}
+    button:hover{background:#6b5ce6}
+    .logout{display:inline-block;background:#dc2626;padding:12px 24px;margin-top:40px;text-decoration:none;color:white;border-radius:8px}
     a{color:#7c6ff7;text-decoration:none;display:block;margin-top:24px}
-    h1{font-family:'Playfair Display',serif;font-weight:400;font-size:2.2em;color:#fff;letter-spacing:1px;margin-bottom:10px}
+    h1{font-family:'Playfair Display',serif;font-weight:400;font-size:2.2em;color:#fff;margin-bottom:10px}
     .subtitle{color:#888;margin-bottom:40px;font-size:0.95em}
-    label{display:block;margin-top:24px;color:#aaa;font-size:0.9em;letter-spacing:1px;font-weight:500}
+    label{display:block;margin-top:24px;color:#aaa;font-size:0.9em;font-weight:500}
     .helper{color:#666;font-size:0.8em;margin-top:-5px;margin-bottom:10px}
     .container{max-width:700px;margin:0 auto;padding:80px 40px}
   </style></head><body><div class="container">
@@ -321,21 +242,16 @@ app.get('/admin', requireLogin, (req, res) => {
     <form method="POST" action="/admin/add-product">
       <label>Product Name</label>
       <input type="text" name="name" required placeholder="e.g., Midnight Tokyo Poster">
-      
       <label>Price (USD)</label>
       <input type="number" step="0.01" name="price_usd" required placeholder="10.00">
-      
       <label>Description</label>
-      <textarea name="description" rows="3" placeholder="Short description of the product..."></textarea>
-      
+      <textarea name="description" rows="3" placeholder="Short description..."></textarea>
       <label>Product Image URL</label>
       <input type="url" name="image_url" placeholder="https://...">
       <p class="helper">Upload your image to Google Drive or Imgur, set sharing to 'Anyone with the link', and paste the direct image link here.</p>
-      
       <label>PDF / Download Link (Secret Content)</label>
       <input type="url" name="secret_content" required placeholder="https://drive.google.com/...">
       <p class="helper">This is the link customers get AFTER they pay. Paste your Google Drive PDF link here.</p>
-      
       <button type="submit">Publish Product</button>
     </form>
     <a href="/">← Back to Shop</a>
@@ -345,26 +261,14 @@ app.get('/admin', requireLogin, (req, res) => {
 
 app.post('/admin/add-product', requireLogin, (req, res) => {
   const { name, description, price_usd, image_url, secret_content } = req.body;
-  
-  if (!name || !price_usd || !secret_content) {
-    return res.send('<h2 style="color:#f87171;font-family:Inter;">Error: Name, Price, and Download Link are required.</h2> <a href="/admin" style="font-family:Inter;">Go Back</a>');
-  }
-  
+  if (!name || !price_usd || !secret_content) return res.send('<h2 style="color:#f87171;">Error: Name, Price, and Download Link are required.</h2> <a href="/admin">Go Back</a>');
   try { 
     const autoId = 'PROD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
     db.prepare(`INSERT INTO products (id, name, description, price_usd, image_url, secret_content) VALUES (?, ?, ?, ?, ?, ?)`).run(autoId, name, description || '', Number(price_usd), image_url || '', secret_content); 
-    
-    res.send(`<!doctype html><html><head><title>Success</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;text-align:center;max-width:500px}h2{color:#4ade80;font-family:'Playfair Display',serif;font-weight:400;margin-bottom:20px}a{color:#7c6ff7;text-decoration:none;margin:0 10px}</style></head><body><div class="box"><h2>✅ Product Published Successfully!</h2><p style="color:#888;margin-bottom:30px;">Your product is now live on the store.</p><a href="/admin">Add Another Product</a><a href="/">View Live Shop</a></div></body></html>`); 
-  } catch (err) { 
-    res.send(`<h2 style="color:#f87171;font-family:'Playfair Display',serif;">Error adding product:</h2> <p>${escapeHtml(err.message)}</p> <a href="/admin" style="font-family:'Inter',sans-serif;">Go Back</a>`); 
-  }
+    res.send(`<!doctype html><html><head><title>Success</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;text-align:center;max-width:500px}h2{color:#4ade80;font-family:'Playfair Display',serif;font-weight:400;margin-bottom:20px}a{color:#7c6ff7;text-decoration:none;margin:0 10px}</style></head><body><div class="box"><h2>✅ Product Published Successfully!</h2><p style="color:#888;margin-bottom:30px;">Your product is now live on the store.</p><a href="/admin">Add Another Product</a><a href="/">View Live Shop</a></div></body></html>`); 
+  } catch (err) { res.send(`<h2 style="color:#f87171;">Error:</h2> <p>${escapeHtml(err.message)}</p> <a href="/admin">Go Back</a>`); }
 });
 
-app.get('/admin/logout', (req, res) => { 
-  req.session.destroy((err) => { res.redirect('/admin/login'); }); 
-});
+app.get('/admin/logout', (req, res) => { req.session.destroy((err) => { res.redirect('/admin/login'); }); });
 
-app.listen(PORT, () => { 
-  console.log(`Server running at ${BASE_URL}`); 
-  console.log(`Admin panel: ${BASE_URL}/admin/login`); 
-});
+app.listen(PORT, () => { console.log(`Server running at ${BASE_URL}`); console.log(`Admin panel: ${BASE_URL}/admin/login`); });
