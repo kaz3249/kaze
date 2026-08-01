@@ -280,7 +280,26 @@ app.post('/admin/login', (req, res) => {
     res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">❌ Incorrect password. Please try again.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
   }
 });
-
+app.post('/admin/login', (req, res) => {
+  const enteredPassword = req.body.password;
+  const realPassword = process.env.ADMIN_PASSWORD || 'test123'; 
+  
+  console.log('=== LOGIN ATTEMPT ===');
+  console.log('Entered:', enteredPassword);
+  console.log('Expected:', realPassword);
+  console.log('Match:', enteredPassword === realPassword);
+  
+  if (enteredPassword === realPassword) { 
+    console.log('Password correct! Setting session...');
+    req.session.isAdmin = true; 
+    
+    // Simple redirect without callback - more reliable
+    res.redirect('/admin'); 
+  } else { 
+    console.log('Password incorrect!');
+    res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">❌ Incorrect password. Please try again.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
+  }
+});
 app.get('/admin', requireLogin, (req, res) => { 
   res.send(`<!doctype html><html><head><title>Admin Dashboard</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>
     body{font-family:'Inter',sans-serif;margin:0;background:#000;color:#e5e7eb}
