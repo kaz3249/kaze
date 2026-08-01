@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3';
 
 export const db = new Database('shop.db');
-
 db.pragma('journal_mode = WAL');
 
 db.exec(`
@@ -9,7 +8,6 @@ CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  subtitle TEXT NOT NULL DEFAULT '',
   price_usd REAL NOT NULL,
   images TEXT NOT NULL DEFAULT '[]',
   secret_content TEXT NOT NULL DEFAULT '',
@@ -30,3 +28,7 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at TEXT
 );
 `);
+
+// Fix for existing databases: Add columns if they don't exist
+try { db.exec(`ALTER TABLE products ADD COLUMN images TEXT DEFAULT '[]';`); } catch (e) {}
+try { db.exec(`ALTER TABLE products ADD COLUMN description TEXT DEFAULT '';`); } catch (e) {}
