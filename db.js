@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS products (
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   price_usd REAL NOT NULL,
+  image_url TEXT NOT NULL DEFAULT '',
   secret_content TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
