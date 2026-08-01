@@ -22,11 +22,15 @@ app.use(
   })
 );
 
+// FIXED SESSION CONFIGURATION
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'fallback_secret',
+  secret: process.env.SESSION_SECRET || 'super_secret_kaze_key_123',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 24 } // 1 day session
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 1000 * 60 * 60 * 24 // 24 hours
+  }
 }));
 
 class ApiError extends Error {
@@ -246,10 +250,10 @@ app.post('/webhook/nowpayments', async (req, res) => {
 });
 
 // ==========================================
-// ADMIN PANEL (FIXED LOGIN & NEW DASHBOARD)
+// ADMIN PANEL (FIXED LOGIN & DASHBOARD)
 // ==========================================
 const requireLogin = (req, res, next) => { 
-  if (req.session && req.session.isAdmin) return next(); 
+  if (req.session && req.session.isAdmin === true) return next(); 
   res.redirect('/admin/login'); 
 };
 
@@ -257,18 +261,23 @@ app.get('/admin/login', (req, res) => {
   res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px;transition:all 0.3s ease}button:hover{background:#6b5ce6}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
 });
 
+// FIXED LOGIN ROUTE
 app.post('/admin/login', (req, res) => {
-  // Fixed login logic to ensure it reads the password correctly
   const enteredPassword = req.body.password;
-  console.log('Login attempt received');
+  console.log('Login attempt. Entered:', enteredPassword, 'Expected:', process.env.ADMIN_PASSWORD);
   
-  if (enteredPassword && enteredPassword === process.env.ADMIN_PASSWORD) { 
+  if (enteredPassword === process.env.ADMIN_PASSWORD) { 
     req.session.isAdmin = true; 
-    req.session.save(() => {
+    // Force save the session before redirecting to fix the bug
+    req.session.save((err) => {
+      if (err) {
+        console.error("Session save error:", err);
+        return res.status(500).send("Error saving session. Please try again.");
+      }
       res.redirect('/admin'); 
     });
   } else { 
-    res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">Incorrect password. Please try again.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
+    res.send(`<!doctype html><html><head><title>Admin Login</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.login-box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;width:380px;text-align:center}input{width:100%;padding:14px;margin:20px 0;border-radius:8px;border:1px solid #2a2a2a;background:#000;color:#e5e7eb;box-sizing:border-box;font-size:1em}button{width:100%;padding:16px;border-radius:8px;border:none;background:#7c6ff7;color:white;font-weight:500;cursor:pointer;font-size:1em;letter-spacing:1px}.error{color:#f87171;font-size:14px;margin-bottom:16px}h2{font-family:'Playfair Display',serif;font-weight:400;font-size:1.8em;color:#fff;letter-spacing:1px}</style></head><body><div class="login-box"><h2>Admin Login</h2><div class="error">❌ Incorrect password. Please try again.</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required autofocus><button type="submit">Login</button></form></div></body></html>`); 
   }
 });
 
@@ -287,7 +296,6 @@ app.get('/admin', requireLogin, (req, res) => {
     label{display:block;margin-top:24px;color:#aaa;font-size:0.9em;letter-spacing:1px;font-weight:500}
     .helper{color:#666;font-size:0.8em;margin-top:-5px;margin-bottom:10px}
     .container{max-width:700px;margin:0 auto;padding:80px 40px}
-    .success-msg{background:#064e3b;border:1px solid #4ade80;color:#4ade80;padding:20px;border-radius:8px;margin-bottom:30px;text-align:center}
   </style></head><body><div class="container">
     <h1>Add New Product</h1>
     <p class="subtitle">Fill in the details below. When you click Publish, it goes live instantly.</p>
@@ -324,9 +332,7 @@ app.post('/admin/add-product', requireLogin, (req, res) => {
   }
   
   try { 
-    // Auto-generate a short ID based on the name
     const autoId = 'PROD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
-    
     db.prepare(`INSERT INTO products (id, name, description, price_usd, image_url, secret_content) VALUES (?, ?, ?, ?, ?, ?)`).run(autoId, name, description || '', Number(price_usd), image_url || '', secret_content); 
     
     res.send(`<!doctype html><html><head><title>Success</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"><style>body{font-family:'Inter',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#e5e7eb;margin:0}.box{background:#0a0a0a;padding:50px;border-radius:12px;border:1px solid #1a1a1a;text-align:center;max-width:500px}h2{color:#4ade80;font-family:'Playfair Display',serif;font-weight:400;margin-bottom:20px}a{color:#7c6ff7;text-decoration:none;margin:0 10px}</style></head><body><div class="box"><h2>✅ Product Published Successfully!</h2><p style="color:#888;margin-bottom:30px;">Your product is now live on the store.</p><a href="/admin">Add Another Product</a><a href="/">View Live Shop</a></div></body></html>`); 
