@@ -6,20 +6,28 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+function convertQuestionMarks(sql) {
+  let index = 0;
+  return sql.replace(/\?/g, () => `$${++index}`);
+}
+
 export const db = {
-  prepare: (sql) => ({
-    get: async (...params) => {
-      const res = await pool.query(sql, params);
-      return res.rows[0];
-    },
-    all: async (...params) => {
-      const res = await pool.query(sql, params);
-      return res.rows;
-    },
-    run: async (...params) => {
-      await pool.query(sql, params);
-    }
-  }),
+  prepare: (sql) => {
+    const convertedSql = convertQuestionMarks(sql);
+    return {
+      get: async (...params) => {
+        const res = await pool.query(convertedSql, params);
+        return res.rows[0];
+      },
+      all: async (...params) => {
+        const res = await pool.query(convertedSql, params);
+        return res.rows;
+      },
+      run: async (...params) => {
+        await pool.query(convertedSql, params);
+      }
+    };
+  },
   exec: async (sql) => {
     await pool.query(sql);
   }
