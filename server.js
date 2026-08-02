@@ -67,7 +67,7 @@ async function createOrderCore({ productId }) {
   const status = normalizeStatus(checkout.payment_status || 'pending');
   await db.prepare(`INSERT INTO orders (id, product_id, status, price_usd, checkout_url, nowpayments_payment_id) VALUES (?, ?, ?, ?, ?, ?)`).run(orderId, product.id, status, product.price_usd, checkout.checkout_url, checkout.payment_id);
   const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
-  await sendTelegram(`🛒 <b>New Order</b>\nID: <code>${order.id}</code>\nProduct: <code>${product.id}</code>\nPrice: $${product.price_usd}`);
+  await sendTelegram(` <b>New Order</b>\nID: <code>${order.id}</code>\nProduct: <code>${product.id}</code>\nPrice: $${product.price_usd}`);
   return { order, product, checkout };
 }
 
@@ -175,7 +175,7 @@ app.get('/', async (_req, res) => {
   </style></head><body>${navHTML}
   <section id="home"><h1 class="hero-title">Where <span class="highlight">wind</span> becomes <span class="italic">cinematic art.</span></h1><p class="hero-subtitle">Printable calendars, posters and wall art inspired by JDM culture, anime, and the quiet cinema of Japan at night.</p><div class="hero-buttons"><a href="#shop" class="btn-primary">Enter the store ›</a><a href="#contact" class="btn-outline">Contact us</a></div><div class="trust-badge"><span class="trust-stars">★★★★★</span> Trusted by collectors in 40+ countries</div></section>
   <section id="shop"><div style="text-align:center;"><div class="badge">COLLECTION</div></div><h2 class="section-title">Shop</h2><div class="title-divider"></div>${productsHTML}</section>
-  <section id="contact"><div style="text-align:center;"><div class="badge">REACH US</div></div><h2 class="section-title">A quiet channel, always open.</h2><p style="color:#888; margin-bottom:60px; max-width:600px; margin:0 auto;">Questions about a piece, a custom commission, or a wholesale order? We reply within 24h.</p><div class="contact-grid"><a href="mailto:kaze.2.7.7.9.3@gmail.com" class="contact-card"><div class="contact-icon icon-email">${svgEmail}</div><div class="contact-label">Email</div><div class="contact-value">kaze.2.7.7.9.3@gmail.com</div></a><a href="https://t.me/277_RYNA" target="_blank" class="contact-card"><div class="contact-icon icon-telegram">${svgTelegram}</div><div class="contact-label">Telegram</div><div class="contact-value">@277_RYNA</div></a><a href="https://pinterest.com/KAZE277" target="_blank" class="contact-card"><div class="contact-icon icon-pinterest">${svgPinterest}</div><div class="contact-label">Pinterest</div><div class="contact-value">@KAZE277</div></a></div></section>
+  <section id="contact"><div style="text-align:center;"><div class="badge">REACH US</div></div><h2 class="section-title">A quiet channel, always open.</h2><p style="color:#888; margin-bottom:60px; max-width:600px; margin:0 auto;">Questions about a piece, a custom commission, or a wholesale order? We reply within 24h.</p><div class="contact-grid"><a href="mailto:kaze.2.7.7.9.3@gmail.com" class="contact-card"><div class="contact-icon icon-email">${svgEmail}</div><div class="contact-label">Email</div><div class="contact-value">kaze.2.7.7.9.3@gmail.com</div></a><a href="https://t.me/Kaze277" target="_blank" class="contact-card"><div class="contact-icon icon-telegram">${svgTelegram}</div><div class="contact-label">Telegram</div><div class="contact-value">@Kaze277</div></a><a href="https://pinterest.com/KAZE277" target="_blank" class="contact-card"><div class="contact-icon icon-pinterest">${svgPinterest}</div><div class="contact-label">Pinterest</div><div class="contact-value">@KAZE277</div></a></div></section>
   <section id="policy"><div style="text-align:center;"><div class="badge">FINE PRINT</div></div><h2 class="section-title">Return & Refund Policy</h2><div class="title-divider"></div><div class="policy-content"><div class="policy-section"><h2>Digital products</h2><p>All digital downloads are final. Because files are delivered instantly and cannot be "returned", we do not offer refunds on digital purchases. If your file is corrupted or the download link fails, contact us within 7 days and we'll re-issue it.</p></div><div class="policy-section"><h2>Custom commissions</h2><p>Custom work is non-refundable once the creative process has begun. We provide previews and revisions throughout the process to ensure your satisfaction before final delivery.</p></div></div></section>${footerHTML}
   <script>
     const carousels = {};
@@ -229,7 +229,7 @@ app.get('/order/:id', async (req, res) => {
     productBox = `<div class="unlocked-box"><h2>✅ Product Unlocked</h2><p><strong>Name:</strong> ${escapeHtml(product.name)}</p>${downloadBtn}<h3 style="margin-top:20px;">Access Link:</h3><pre>${escapeHtml(product.secret_content)}</pre></div>`;
   } else {
     const portalButton = order.checkout_url ? `<a href="${escapeHtml(order.checkout_url)}" target="_blank" class="pay-btn">Proceed to Payment</a>` : `<p>Payment pending...</p>`;
-    productBox = `<div class="locked-box"><h2>🔒 Payment Required</h2><p><strong>Price:</strong> <span class="price-tag">$${escapeHtml(order.price_usd)}</span></p>${portalButton}<p class="help-text">Need help? <a href="https://t.me/277_RYNA">Contact us</a></p></div>`;
+    productBox = `<div class="locked-box"><h2>🔒 Payment Required</h2><p><strong>Price:</strong> <span class="price-tag">$${escapeHtml(order.price_usd)}</span></p>${portalButton}<p class="help-text">Need help? <a href="https://t.me/Kaze277">Contact us</a></p></div>`;
   }
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Order Details</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400;600&display=swap" rel="stylesheet"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#000;color:#e5e5e5;min-height:100vh}.container{max-width:700px;margin:0 auto;padding:80px 40px}.card{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:16px;padding:50px}h1{font-family:'Playfair Display',serif;font-size:2.5em;margin-bottom:30px;color:#fff}.info-row{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #1a1a1a}.info-label{color:#666;font-size:0.85em;margin-bottom:6px}.info-value{font-size:1.1em;color:#fff}code{background:#1a1a1a;padding:3px 10px;border-radius:4px;color:#7c6ff7}.unlocked-box{background:#064e3b;border:1px solid #4ade80;border-radius:12px;padding:30px;margin-top:30px}.unlocked-box h2{color:#4ade80;margin-bottom:16px}.locked-box{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:30px;margin-top:30px}.locked-box h2{color:#fbbf24;margin-bottom:16px}.price-tag{color:#4ade80;font-size:1.4em;font-weight:600}.pay-btn{display:inline-block;background:#7c6ff7;color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:500;margin-top:16px}.help-text{margin-top:24px;color:#888}.help-text a{color:#7c6ff7;text-decoration:none}pre{background:#020617;padding:20px;border-radius:8px;white-space:pre-wrap;margin-top:16px}a{color:#7c6ff7;text-decoration:none}</style></head><body><div class="container"><div class="card"><h1>Order Details</h1><div class="info-row"><div class="info-label">ORDER ID</div><div class="info-value"><code>${escapeHtml(order.id)}</code></div></div><div class="info-row"><div class="info-label">STATUS</div><div class="info-value" style="color:${order.status === 'paid' ? '#4ade80' : '#fbbf24'};font-weight:600;">${escapeHtml(order.status.toUpperCase())}</div></div><div class="info-row"><div class="info-label">PRICE</div><div class="info-value">$${escapeHtml(order.price_usd)}</div></div>${productBox}<p style="margin-top:32px;"><a href="/">← Back to Shop</a></p></div></div><script>const orderId=${JSON.stringify(order.id)};async function checkStatus(){try{const res=await fetch('/api/orders/'+encodeURIComponent(orderId));const data=await res.json();if(!data.locked)window.location.reload();}catch(e){}}setInterval(checkStatus,5000);</script></body></html>`);
 });
@@ -250,7 +250,7 @@ app.post('/webhook/nowpayments', async (req, res) => {
     const previousStatus = order.status; const newStatus = normalizeStatus(payload.payment_status || payload.status || order.status);
     await db.prepare(`UPDATE orders SET status = ?, nowpayments_payment_id = COALESCE(?, nowpayments_payment_id), pay_amount = COALESCE(?, pay_amount), paid_at = CASE WHEN ? = 'paid' AND paid_at IS NULL THEN CURRENT_TIMESTAMP ELSE paid_at END WHERE id = ?`).run(newStatus, payload.payment_id ?? null, payload.pay_amount ?? null, newStatus, order.id);
     const updated = await db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
-    if (previousStatus !== newStatus && ['paid', 'partial', 'failed', 'confirming'].includes(newStatus)) { const emoji = newStatus === 'paid' ? '✅' : newStatus === 'partial' ? '⚠️' : newStatus === 'confirming' ? '🕒' : '❌'; await sendTelegram(`${emoji} <b>Payment ${escapeHtml(newStatus.toUpperCase())}</b>\nOrder ID: <code>${escapeHtml(updated.id)}</code>\nProduct ID: <code>${escapeHtml(product.id)}</code>`); }
+    if (previousStatus !== newStatus && ['paid', 'partial', 'failed', 'confirming'].includes(newStatus)) { const emoji = newStatus === 'paid' ? '✅' : newStatus === 'partial' ? '⚠️' : newStatus === 'confirming' ? '' : '❌'; await sendTelegram(`${emoji} <b>Payment ${escapeHtml(newStatus.toUpperCase())}</b>\nOrder ID: <code>${escapeHtml(updated.id)}</code>\nProduct ID: <code>${escapeHtml(product.id)}</code>`); }
     res.status(200).send('ok');
   } catch (err) { console.error('Webhook error:', err); res.status(200).send('ok'); }
 });
@@ -267,7 +267,7 @@ app.post('/admin/login', (req, res) => {
   const realPassword = process.env.ADMIN_PASSWORD || 'test123'; 
   console.log('Login attempt - Entered:', enteredPassword, 'Expected:', realPassword);
   if (enteredPassword === realPassword) { req.session.isAdmin = true; res.redirect('/admin'); } 
-  else { res.send(`<!doctype html><html><head><title>Admin Login</title><style>body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#fff;margin:0}.box{background:#111;padding:40px;border-radius:12px;width:350px;text-align:center}input{width:100%;padding:12px;margin:15px 0;border-radius:6px;border:1px solid #333;background:#000;color:#fff}button{width:100%;padding:14px;border-radius:6px;border:none;background:#7c6ff7;color:#fff;font-weight:bold;cursor:pointer}.error{color:#f87171;margin-bottom:15px}</style></head><body><div class="box"><h2>Admin Login</h2><div class="error">❌ Incorrect password</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required><button>Login</button></form></div></body></html>`); }
+  else { res.send(`<!doctype html><html><head><title>Admin Login</title><style>body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#fff;margin:0}.box{background:#111;padding:40px;border-radius:12px;width:350px;text-align:center}input{width:100%;padding:12px;margin:15px 0;border-radius:6px;border:1px solid #333;background:#000;color:#fff}button{width:100%;padding:14px;border-radius:6px;border:none;background:#7c6ff7;color:#fff;font-weight:bold;cursor:pointer}.error{color:#f87171;margin-bottom:15px}</style></head><body><div class="box"><h2>Admin Login</h2><div class="error"> Incorrect password</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required><button>Login</button></form></div></body></html>`); }
 });
 
 function renderAdminForm(product = null) {
@@ -311,15 +311,18 @@ function renderAdminForm(product = null) {
     ${!isEdit ? `
       <div class="product-list">
         <h2>Existing Products</h2>
-        ${db.prepare('SELECT id, name, price_usd FROM products ORDER BY created_at DESC').all().then(rows => rows.map(p => `
-          <div class="product-row">
-            <div><strong>${escapeHtml(p.name)}</strong> - $${p.price_usd}</div>
-            <div class="product-row-actions">
-              <a href="/admin/edit/${escapeHtml(p.id)}" style="margin:0;display:inline-block;">Edit</a>
-              <form method="POST" action="/admin/delete" style="display:inline;margin:0;"><input type="hidden" name="id" value="${escapeHtml(p.id)}"><button type="submit" class="btn-danger" style="margin:0;">Delete</button></form>
+        ${(async () => {
+          const rows = await db.prepare('SELECT id, name, price_usd FROM products ORDER BY created_at DESC').all();
+          return rows.map(p => `
+            <div class="product-row">
+              <div><strong>${escapeHtml(p.name)}</strong> - $${p.price_usd}</div>
+              <div class="product-row-actions">
+                <a href="/admin/edit/${escapeHtml(p.id)}" style="margin:0;display:inline-block;">Edit</a>
+                <form method="POST" action="/admin/delete" style="display:inline;margin:0;"><input type="hidden" name="id" value="${escapeHtml(p.id)}"><button type="submit" class="btn-danger" style="margin:0;">Delete</button></form>
+              </div>
             </div>
-          </div>
-        `).join('')).catch(() => '')}
+          `).join('');
+        })().catch(() => '')}
       </div>
       <a href="/">← Back to Shop</a>
       <a href="/admin/logout" class="btn-danger" style="display:inline-block;margin-top:20px;">Logout</a>
