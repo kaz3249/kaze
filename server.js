@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import crypto from 'node:crypto';
 import session from 'express-session';
-import { db } from './db.js';
+import { db, initDB } from './db.js';
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -38,10 +38,10 @@ function normalizeStatus(status) {
   return s || 'pending';
 }
 
-function getOrderAndProduct(orderId) {
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+async function getOrderAndProduct(orderId) {
+  const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   if (!order) return null;
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+  const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
   return product ? { order, product } : null;
 }
 
@@ -58,15 +58,15 @@ async function createNowPaymentsCheckout({ orderId, productId, priceUsd }) {
 }
 
 async function createOrderCore({ productId }) {
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
+  const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(productId);
   if (!product) throw new ApiError(404, 'Product not found');
   const orderId = crypto.randomUUID();
   let checkout;
   try { checkout = await createNowPaymentsCheckout({ orderId, productId: product.id, priceUsd: product.price_usd }); } 
   catch (err) { await sendTelegram(`⚠️ Payment failed for ${product.id}: ${err.message}`); throw err; }
   const status = normalizeStatus(checkout.payment_status || 'pending');
-  db.prepare(`INSERT INTO orders (id, product_id, status, price_usd, checkout_url, nowpayments_payment_id) VALUES (?, ?, ?, ?, ?, ?)`).run(orderId, product.id, status, product.price_usd, checkout.checkout_url, checkout.payment_id);
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  await db.prepare(`INSERT INTO orders (id, product_id, status, price_usd, checkout_url, nowpayments_payment_id) VALUES (?, ?, ?, ?, ?, ?)`).run(orderId, product.id, status, product.price_usd, checkout.checkout_url, checkout.payment_id);
+  const order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   await sendTelegram(`🛒 <b>New Order</b>\nID: <code>${order.id}</code>\nProduct: <code>${product.id}</code>\nPrice: $${product.price_usd}`);
   return { order, product, checkout };
 }
@@ -81,8 +81,8 @@ const svgPinterest = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.
 // ==========================================
 // MAIN STORE PAGE
 // ==========================================
-app.get('/', (_req, res) => {
-  const allProducts = db.prepare('SELECT id, name, description, price_usd, images FROM products ORDER BY created_at DESC').all();
+app.get('/', async (_req, res) => {
+  const allProducts = await db.prepare('SELECT id, name, description, price_usd, images FROM products ORDER BY created_at DESC').all();
   
   let productsHTML = '';
   if (allProducts.length === 0) {
@@ -218,8 +218,8 @@ app.post('/buy', async (req, res) => {
   }
 });
 
-app.get('/order/:id', (req, res) => {
-  const data = getOrderAndProduct(req.params.id);
+app.get('/order/:id', async (req, res) => {
+  const data = await getOrderAndProduct(req.params.id);
   if (!data) return res.status(404).send('<h1>Order not found</h1><a href="/">Back</a>');
   const { order, product } = data;
   const isPaid = order.status === 'paid';
@@ -234,8 +234,8 @@ app.get('/order/:id', (req, res) => {
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Order Details</title><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400&family=Inter:wght@400;600&display=swap" rel="stylesheet"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Inter',sans-serif;background:#000;color:#e5e5e5;min-height:100vh}.container{max-width:700px;margin:0 auto;padding:80px 40px}.card{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:16px;padding:50px}h1{font-family:'Playfair Display',serif;font-size:2.5em;margin-bottom:30px;color:#fff}.info-row{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid #1a1a1a}.info-label{color:#666;font-size:0.85em;margin-bottom:6px}.info-value{font-size:1.1em;color:#fff}code{background:#1a1a1a;padding:3px 10px;border-radius:4px;color:#7c6ff7}.unlocked-box{background:#064e3b;border:1px solid #4ade80;border-radius:12px;padding:30px;margin-top:30px}.unlocked-box h2{color:#4ade80;margin-bottom:16px}.locked-box{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:30px;margin-top:30px}.locked-box h2{color:#fbbf24;margin-bottom:16px}.price-tag{color:#4ade80;font-size:1.4em;font-weight:600}.pay-btn{display:inline-block;background:#7c6ff7;color:white;text-decoration:none;padding:14px 32px;border-radius:8px;font-weight:500;margin-top:16px}.help-text{margin-top:24px;color:#888}.help-text a{color:#7c6ff7;text-decoration:none}pre{background:#020617;padding:20px;border-radius:8px;white-space:pre-wrap;margin-top:16px}a{color:#7c6ff7;text-decoration:none}</style></head><body><div class="container"><div class="card"><h1>Order Details</h1><div class="info-row"><div class="info-label">ORDER ID</div><div class="info-value"><code>${escapeHtml(order.id)}</code></div></div><div class="info-row"><div class="info-label">STATUS</div><div class="info-value" style="color:${order.status === 'paid' ? '#4ade80' : '#fbbf24'};font-weight:600;">${escapeHtml(order.status.toUpperCase())}</div></div><div class="info-row"><div class="info-label">PRICE</div><div class="info-value">$${escapeHtml(order.price_usd)}</div></div>${productBox}<p style="margin-top:32px;"><a href="/">← Back to Shop</a></p></div></div><script>const orderId=${JSON.stringify(order.id)};async function checkStatus(){try{const res=await fetch('/api/orders/'+encodeURIComponent(orderId));const data=await res.json();if(!data.locked)window.location.reload();}catch(e){}}setInterval(checkStatus,5000);</script></body></html>`);
 });
 
-app.get('/api/products', (_req, res) => { res.json(db.prepare('SELECT id, price_usd FROM products ORDER BY created_at DESC').all()); });
-app.get('/api/orders/:id', (req, res) => { const data = getOrderAndProduct(req.params.id); if (!data) return res.status(404).json({ error: 'Not found' }); res.json({ locked: data.order.status !== 'paid', order: data.order, product: data.order.status === 'paid' ? data.product : { id: data.product.id } }); });
+app.get('/api/products', async (_req, res) => { res.json(await db.prepare('SELECT id, price_usd FROM products ORDER BY created_at DESC').all()); });
+app.get('/api/orders/:id', async (req, res) => { const data = await getOrderAndProduct(req.params.id); if (!data) return res.status(404).json({ error: 'Not found' }); res.json({ locked: data.order.status !== 'paid', order: data.order, product: data.order.status === 'paid' ? data.product : { id: data.product.id } }); });
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 app.post('/webhook/nowpayments', async (req, res) => {
@@ -243,20 +243,20 @@ app.post('/webhook/nowpayments', async (req, res) => {
     const secret = process.env.NOWPAYMENTS_IPN_SECRET;
     if (secret) { const sig = req.header('x-nowpayments-signature') || ''; const hmac = crypto.createHmac('sha512', secret).update(req.rawBody || '').digest('hex'); if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(hmac))) return res.status(401).send('Invalid signature'); }
     const payload = req.body || {}; let order = null;
-    if (payload.order_id) order = db.prepare('SELECT * FROM orders WHERE id = ?').get(String(payload.order_id));
-    if (!order && payload.payment_id) order = db.prepare('SELECT * FROM orders WHERE nowpayments_payment_id = ?').get(String(payload.payment_id));
+    if (payload.order_id) order = await db.prepare('SELECT * FROM orders WHERE id = ?').get(String(payload.order_id));
+    if (!order && payload.payment_id) order = await db.prepare('SELECT * FROM orders WHERE nowpayments_payment_id = ?').get(String(payload.payment_id));
     if (!order) return res.status(200).send('ignored');
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
+    const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(order.product_id);
     const previousStatus = order.status; const newStatus = normalizeStatus(payload.payment_status || payload.status || order.status);
-    db.prepare(`UPDATE orders SET status = ?, nowpayments_payment_id = COALESCE(?, nowpayments_payment_id), pay_amount = COALESCE(?, pay_amount), paid_at = CASE WHEN ? = 'paid' AND paid_at IS NULL THEN datetime('now') ELSE paid_at END WHERE id = ?`).run(newStatus, payload.payment_id ?? null, payload.pay_amount ?? null, newStatus, order.id);
-    const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
+    await db.prepare(`UPDATE orders SET status = ?, nowpayments_payment_id = COALESCE(?, nowpayments_payment_id), pay_amount = COALESCE(?, pay_amount), paid_at = CASE WHEN ? = 'paid' AND paid_at IS NULL THEN CURRENT_TIMESTAMP ELSE paid_at END WHERE id = ?`).run(newStatus, payload.payment_id ?? null, payload.pay_amount ?? null, newStatus, order.id);
+    const updated = await db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
     if (previousStatus !== newStatus && ['paid', 'partial', 'failed', 'confirming'].includes(newStatus)) { const emoji = newStatus === 'paid' ? '✅' : newStatus === 'partial' ? '⚠️' : newStatus === 'confirming' ? '🕒' : '❌'; await sendTelegram(`${emoji} <b>Payment ${escapeHtml(newStatus.toUpperCase())}</b>\nOrder ID: <code>${escapeHtml(updated.id)}</code>\nProduct ID: <code>${escapeHtml(product.id)}</code>`); }
     res.status(200).send('ok');
   } catch (err) { console.error('Webhook error:', err); res.status(200).send('ok'); }
 });
 
 // ==========================================
-// ADMIN PANEL (With Edit/Delete & Description)
+// ADMIN PANEL
 // ==========================================
 const requireLogin = (req, res, next) => { if (req.session && req.session.isAdmin === true) return next(); res.redirect('/admin/login'); };
 
@@ -270,7 +270,6 @@ app.post('/admin/login', (req, res) => {
   else { res.send(`<!doctype html><html><head><title>Admin Login</title><style>body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#000;color:#fff;margin:0}.box{background:#111;padding:40px;border-radius:12px;width:350px;text-align:center}input{width:100%;padding:12px;margin:15px 0;border-radius:6px;border:1px solid #333;background:#000;color:#fff}button{width:100%;padding:14px;border-radius:6px;border:none;background:#7c6ff7;color:#fff;font-weight:bold;cursor:pointer}.error{color:#f87171;margin-bottom:15px}</style></head><body><div class="box"><h2>Admin Login</h2><div class="error">❌ Incorrect password</div><form method="POST" action="/admin/login"><input type="password" name="password" placeholder="Enter Password" required><button>Login</button></form></div></body></html>`); }
 });
 
-// Helper to render admin forms
 function renderAdminForm(product = null) {
   const isEdit = !!product;
   const imagesValue = product ? (JSON.parse(product.images || '[]')).join('\n') : '';
@@ -312,7 +311,7 @@ function renderAdminForm(product = null) {
     ${!isEdit ? `
       <div class="product-list">
         <h2>Existing Products</h2>
-        ${db.prepare('SELECT id, name, price_usd FROM products ORDER BY created_at DESC').all().map(p => `
+        ${db.prepare('SELECT id, name, price_usd FROM products ORDER BY created_at DESC').all().then(rows => rows.map(p => `
           <div class="product-row">
             <div><strong>${escapeHtml(p.name)}</strong> - $${p.price_usd}</div>
             <div class="product-row-actions">
@@ -320,7 +319,7 @@ function renderAdminForm(product = null) {
               <form method="POST" action="/admin/delete" style="display:inline;margin:0;"><input type="hidden" name="id" value="${escapeHtml(p.id)}"><button type="submit" class="btn-danger" style="margin:0;">Delete</button></form>
             </div>
           </div>
-        `).join('')}
+        `).join('')).catch(() => '')}
       </div>
       <a href="/">← Back to Shop</a>
       <a href="/admin/logout" class="btn-danger" style="display:inline-block;margin-top:20px;">Logout</a>
@@ -328,40 +327,45 @@ function renderAdminForm(product = null) {
   </div></body></html>`;
 }
 
-app.get('/admin', requireLogin, (req, res) => { res.send(renderAdminForm()); });
+app.get('/admin', requireLogin, async (req, res) => { res.send(await renderAdminForm()); });
 
-app.post('/admin/add-product', requireLogin, (req, res) => {
+app.post('/admin/add-product', requireLogin, async (req, res) => {
   const { name, description, price_usd, images, secret_content } = req.body;
   if (!name || !price_usd || !secret_content) return res.send('<h2 style="color:#f87171;">Error: Name, Price, and Download Link required.</h2> <a href="/admin">Go Back</a>');
   try { 
     const autoId = 'PROD-' + Math.random().toString(36).substr(2, 6).toUpperCase();
     const imageList = (images || '').split('\n').map(s => s.trim()).filter(Boolean);
-    db.prepare(`INSERT INTO products (id, name, description, price_usd, images, secret_content) VALUES (?, ?, ?, ?, ?, ?)`).run(autoId, name, description || '', Number(price_usd), JSON.stringify(imageList), secret_content); 
+    await db.prepare(`INSERT INTO products (id, name, description, price_usd, images, secret_content) VALUES (?, ?, ?, ?, ?, ?)`).run(autoId, name, description || '', Number(price_usd), JSON.stringify(imageList), secret_content); 
     res.redirect('/admin');
   } catch (err) { res.send(`<h2 style="color:#f87171;">Error:</h2> <p>${escapeHtml(err.message)}</p> <a href="/admin">Go Back</a>`); }
 });
 
-app.get('/admin/edit/:id', requireLogin, (req, res) => {
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+app.get('/admin/edit/:id', requireLogin, async (req, res) => {
+  const product = await db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!product) return res.status(404).send('Product not found');
   res.send(renderAdminForm(product));
 });
 
-app.post('/admin/update', requireLogin, (req, res) => {
+app.post('/admin/update', requireLogin, async (req, res) => {
   const { id, name, description, price_usd, images, secret_content } = req.body;
   if (!id || !name || !price_usd || !secret_content) return res.send('<h2 style="color:#f87171;">Error: Missing fields.</h2> <a href="/admin">Go Back</a>');
   try { 
     const imageList = (images || '').split('\n').map(s => s.trim()).filter(Boolean);
-    db.prepare(`UPDATE products SET name=?, description=?, price_usd=?, images=?, secret_content=? WHERE id=?`).run(name, description || '', Number(price_usd), JSON.stringify(imageList), secret_content, id); 
+    await db.prepare(`UPDATE products SET name=?, description=?, price_usd=?, images=?, secret_content=? WHERE id=?`).run(name, description || '', Number(price_usd), JSON.stringify(imageList), secret_content, id); 
     res.redirect('/admin');
   } catch (err) { res.send(`<h2 style="color:#f87171;">Error:</h2> <p>${escapeHtml(err.message)}</p> <a href="/admin">Go Back</a>`); }
 });
 
-app.post('/admin/delete', requireLogin, (req, res) => {
-  try { db.prepare('DELETE FROM products WHERE id = ?').run(req.body.id); res.redirect('/admin'); } 
+app.post('/admin/delete', requireLogin, async (req, res) => {
+  try { await db.prepare('DELETE FROM products WHERE id = ?').run(req.body.id); res.redirect('/admin'); } 
   catch (err) { res.send(`<h2 style="color:#f87171;">Error:</h2> <p>${escapeHtml(err.message)}</p> <a href="/admin">Go Back</a>`); }
 });
 
 app.get('/admin/logout', (req, res) => { req.session.destroy(() => { res.redirect('/admin/login'); }); });
 
-app.listen(PORT, () => { console.log(`Server running at ${BASE_URL}`); console.log(`Admin: ${BASE_URL}/admin/login`); });
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server running at ${BASE_URL}`);
+    console.log(`Admin: ${BASE_URL}/admin/login`);
+  });
+});
